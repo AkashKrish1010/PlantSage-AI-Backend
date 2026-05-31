@@ -1,0 +1,19 @@
+tensorflow>=2.13.0
+numpy
+Pillow
+scikit-learn
+fastapi
+uvicorn[standard]
+python-multipart
+requests
+tqdm
+matplotlib
+python-dotenv
+httpx
+
+# ── Auth dependencies ──────────────────────────────────────────────
+motor>=3.3.0           # async MongoDB driver (built on PyMongo)
+pymongo>=4.6.0         # sync MongoDB (used by motor)
+python-jose[cryptography]>=3.3.0   # JWT creation & verification
+passlib[bcrypt]>=1.7.4             # bcrypt password hashing
+google-auth>=2.28.0    # verify Google ID tokens server-side

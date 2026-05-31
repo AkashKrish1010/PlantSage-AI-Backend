@@ -1,0 +1,51 @@
+# ==========================================
+# Git Ignore Rules for VanaVaidhya ML Module
+# ==========================================
+
+# Python bytecode & caching
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local Environment Variables & Secrets
+.env
+.env.local
+.env.*
+.env*.local
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Jupyter Notebook Auto-saves & Checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Machine Learning training outputs, weights, and model files
+# (Model weights and binaries are extremely large and should not be tracked)
+output/
+
+# Specific binary model formats (just in case they are generated outside output/)
+*.h5
+*.keras
+*.tflite
+*.pb
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.weights
+
+# Re-include lightweight model configurations if needed (e.g. label mappings)
+!output/**/*.json
+
+# Editor / IDE configuration directories
+.vscode/
+.idea/
+
+# OS-specific temporary files
+.DS_Store
+Thumbs.db
