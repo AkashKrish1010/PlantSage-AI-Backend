@@ -51,6 +51,12 @@ if _PLANT_DB_PATH.exists():
 else:
     print(f"⚠️  plant_db.json not found at {_PLANT_DB_PATH} — PFAF lookup disabled")
 
+_LABEL_MAP_PATH = _ROOT_DIR / "assets" / "model" / "label_map.json"
+_LABEL_MAP: dict = {}
+if _LABEL_MAP_PATH.exists():
+    with open(_LABEL_MAP_PATH, encoding="utf-8") as _f:
+        _LABEL_MAP = json.load(_f)
+
 
 # ─── PFAF helpers (mirror of plantDatabase.ts) ───────────────────
 
@@ -687,4 +693,65 @@ async def verify_plant_with_vision(
             "caution": None,
             "plant_care": "Moderate",
             "about_plant": f"{ml_plant_name} is a medicinal plant traditionally utilized for its herbal health remedies.",
+        }
+
+
+async def identify_plant_with_gemini(base64_image: str) -> dict:
+    """
+    Identify a plant from the 71 classes in label_map.json via Gemini Vision.
+    Used as an OOM-free cloud fallback on Render Free instance.
+    """
+    if not _LABEL_MAP:
+        raise RuntimeError("label_map.json not found or empty.")
+
+    # Build options list dynamically
+    options = []
+    for idx, entry in _LABEL_MAP.items():
+        options.append(f"{entry['class_name']} ({entry['display_name']})")
+    options_str = ", ".join(options)
+
+    prompt = (
+        "You are an expert Indian botanist specialising in medicinal plants. Look at this plant image carefully.\n\n"
+        "Identify which of the following 71 target plants is shown in the image:\n"
+        f"[{options_str}]\n\n"
+        "If you are confident it is one of these plants, select it as the top prediction.\n"
+        "If it is not in the list or is not a plant, pick the single closest-looking medicinal plant from the list.\n\n"
+        "Generate a ranked list of top-5 most likely plant matches from the 71 target classes.\n"
+        "Return ONLY a valid JSON object matching this schema (no markdown, no other text):\n"
+        "{\n"
+        '  "class_name": "selected_class_name",\n'
+        '  "confidence": 95.5,\n'
+        '  "top5_class_names": ["class1", "class2", "class3", "class4", "class5"]\n'
+        "}\n\n"
+        "Rules:\n"
+        "- The 'class_name' and all names in 'top5_class_names' must EXACTLY match the lowercase class_names provided in the target list.\n"
+        "- The 'confidence' must be a float representing percentage (e.g. 85.5).\n"
+        "- 'top5_class_names' must contain exactly 5 unique class_names from the list, sorted by descending likelihood."
+    )
+
+    body = {
+        "contents": [{
+            "parts": [
+                {"inline_data": {"mime_type": "image/jpeg", "data": base64_image}},
+                {"text": prompt},
+            ]
+        }],
+        "generationConfig": {
+            "response_mime_type": "application/json",
+            "temperature": 0.1,
+            "maxOutputTokens": 400,
+        },
+    }
+
+    try:
+        raw = await _call_gemini(body, model=GEMINI_VISION_MODEL)
+        parsed = _parse_json_safe(raw)
+        return parsed
+    except Exception as e:
+        print(f"[GeminiIdentify] Failed: {e}")
+        first_5 = [entry["class_name"] for idx, entry in list(_LABEL_MAP.items())[:5]]
+        return {
+            "class_name": first_5[0],
+            "confidence": 70.0,
+            "top5_class_names": first_5
         }

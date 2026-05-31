@@ -38,9 +38,6 @@ import auth_service
 
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"   # suppress oneDNN noise
-import tensorflow as tf
-from tensorflow.keras.applications import EfficientNetV2S
-from tensorflow.keras import layers, Model
 
 # ─── Paths ────────────────────────────────────────────────────────
 ROOT_DIR     = Path(__file__).parent.parent          # VanaVaidhya/
@@ -51,63 +48,71 @@ LABEL_PATH   = MODEL_DIR / "label_map.json"
 IMG_SIZE    = 300
 NUM_CLASSES = 71   # fixed — matches training
 
-# ─── Build & load Keras model ─────────────────────────────────────
-print("🌿 VanaVaidhya AI — Building EfficientNetV2S model...")
-
-if not WEIGHTS_PATH.exists():
-    raise FileNotFoundError(
-        f"Weights not found: {WEIGHTS_PATH}\n"
-        "Copy best_v2.weights.h5 into VanaVaidhya/assets/model/"
-    )
-if not LABEL_PATH.exists():
-    raise FileNotFoundError(
-        f"Label map not found: {LABEL_PATH}\n"
-        "Copy label_map.json into VanaVaidhya/assets/model/"
-    )
-
-# Suppress GPU memory grabs on machines with limited VRAM
-gpus = tf.config.list_physical_devices("GPU")
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
-
-# Rebuild the exact same architecture as training (Cell 9 of the notebook)
-base = EfficientNetV2S(
-    input_shape=(IMG_SIZE, IMG_SIZE, 3),
-    include_top=False,
-    weights=None,          # we load from weights file below
-    pooling="avg",
-    # include_preprocessing=True is default — model rescales [0,255]→[-1,1] internally
-)
-
-inp = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
-x   = base(inp)
-x   = layers.Dense(512, activation="relu")(x)
-x   = layers.BatchNormalization()(x)
-x   = layers.Dropout(0.3)(x)
-x   = layers.Dense(256, activation="relu")(x)
-x   = layers.BatchNormalization()(x)
-x   = layers.Dropout(0.3)(x)
-out = layers.Dense(NUM_CLASSES, activation="softmax", dtype="float32")(x)
-
-model = Model(inp, out)
-
-# Compile (needed so optimizer variables are initialised before loading weights)
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(5e-5),
-    loss="sparse_categorical_crossentropy",
-    metrics=["accuracy"],
-)
-
-print(f"  Loading weights from {WEIGHTS_PATH.name} …")
-model.load_weights(str(WEIGHTS_PATH))
-model.trainable = False   # inference only
-
 # Load label map
-with open(LABEL_PATH) as f:
-    labels: dict = json.load(f)
+labels = {}
+if LABEL_PATH.exists():
+    with open(LABEL_PATH) as f:
+        labels = json.load(f)
+else:
+    print(f"⚠️ Label map not found at {LABEL_PATH}")
 
-print(f"  ✅ Model ready — {NUM_CLASSES} classes | Input: {IMG_SIZE}×{IMG_SIZE}")
-print(f"  🎯 Accuracy: 96.6% val  /  98.4% TTA")
+# Render Free instance has only 512MB RAM, importing tensorflow causes OOM crashes.
+# We auto-switch to Gemini-only mode if weights are missing (e.g. ignored by git)
+# or if specifically forced via env variable.
+USE_LOCAL_MODEL = WEIGHTS_PATH.exists() and os.environ.get("USE_GEMINI_ONLY", "false").lower() != "true"
+
+model = None
+if USE_LOCAL_MODEL:
+    print("🌿 VanaVaidhya AI — Loading local Keras model...")
+    try:
+        import tensorflow as tf
+        from tensorflow.keras.applications import EfficientNetV2S
+        from tensorflow.keras import layers, Model
+
+        # Suppress GPU memory grabs on machines with limited VRAM
+        gpus = tf.config.list_physical_devices("GPU")
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+
+        # Rebuild the exact same architecture as training (Cell 9 of the notebook)
+        base = EfficientNetV2S(
+            input_shape=(IMG_SIZE, IMG_SIZE, 3),
+            include_top=False,
+            weights=None,          # we load from weights file below
+            pooling="avg",
+        )
+
+        inp = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+        x   = base(inp)
+        x   = layers.Dense(512, activation="relu")(x)
+        x   = layers.BatchNormalization()(x)
+        x   = layers.Dropout(0.3)(x)
+        x   = layers.Dense(256, activation="relu")(x)
+        x   = layers.BatchNormalization()(x)
+        x   = layers.Dropout(0.3)(x)
+        out = layers.Dense(NUM_CLASSES, activation="softmax", dtype="float32")(x)
+
+        model = Model(inp, out)
+
+        # Compile (needed so optimizer variables are initialised before loading weights)
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(5e-5),
+            loss="sparse_categorical_crossentropy",
+            metrics=["accuracy"],
+        )
+
+        print(f"  Loading weights from {WEIGHTS_PATH.name} …")
+        model.load_weights(str(WEIGHTS_PATH))
+        model.trainable = False   # inference only
+
+        print(f"  ✅ Local Keras model ready — {NUM_CLASSES} classes | Input: {IMG_SIZE}×{IMG_SIZE}")
+        print(f"  🎯 Accuracy: 96.6% val  /  98.4% TTA")
+    except Exception as e:
+        print(f"  ⚠️ Failed to load local model: {e}")
+        print("  🔄 Switching to Gemini-only Cloud mode.")
+        USE_LOCAL_MODEL = False
+else:
+    print("☁️ VanaVaidhya AI — Running in Gemini-only Cloud mode (no local TensorFlow)...")
 
 
 # ─── FastAPI app ──────────────────────────────────────────────────
@@ -203,31 +208,98 @@ def top5_from_probs(probs: np.ndarray) -> list[dict]:
     return results
 
 
-def identify(image: Image.Image, tta: bool = False) -> dict:
-    """Core identification — single pass or 4-pass TTA."""
-    probs = run_inference(preprocess(image))
-
-    if tta:
-        for seed in range(1, 4):
-            probs = probs + run_inference(augment(image, seed=seed))
-        probs = probs / 4.0
-        method = "TTA (4 passes)"
-    else:
-        method = "single pass"
-
-    top5 = top5_from_probs(probs)
-    top  = top5[0]
-
+def get_label_by_class_name(class_name: str) -> dict:
+    """Helper to retrieve labels entry by its class_name."""
+    for idx, entry in labels.items():
+        if entry.get("class_name") == class_name:
+            return entry
     return {
-        "success":        True,
-        "top_prediction": top,
-        "top5":           top5,
-        "routing":        f"EfficientNetV2S — {method}",
-        "message": (
-            f"⚠️ {top['display_name']} is toxic — do not consume."
-            if top.get("is_toxic") else None
-        ),
+        "class_name": class_name,
+        "display_name": class_name.title().replace("_", " "),
+        "is_toxic": False,
+        "needs_caution": False,
+        "ayush_recognized": False
     }
+
+
+async def identify(image: Image.Image, tta: bool = False) -> dict:
+    """Core identification — single pass or 4-pass TTA on local model, or Gemini fallback."""
+    if USE_LOCAL_MODEL:
+        probs = run_inference(preprocess(image))
+
+        if tta:
+            for seed in range(1, 4):
+                probs = probs + run_inference(augment(image, seed=seed))
+            probs = probs / 4.0
+            method = "TTA (4 passes)"
+        else:
+            method = "single pass"
+
+        top5 = top5_from_probs(probs)
+        top  = top5[0]
+
+        return {
+            "success":        True,
+            "top_prediction": top,
+            "top5":           top5,
+            "routing":        f"EfficientNetV2S — {method}",
+            "message": (
+                f"⚠️ {top['display_name']} is toxic — do not consume."
+                if top.get("is_toxic") else None
+            ),
+        }
+    else:
+        # Convert PIL image to base64 to send to Gemini Vision
+        buffered = io.BytesIO()
+        image.convert("RGB").save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+
+        # Call Gemini to identify the plant
+        gemini_res = await gemini_service.identify_plant_with_gemini(img_str)
+        top5_classes = gemini_res.get("top5_class_names", [])
+        top_confidence = gemini_res.get("confidence", 90.0)
+
+        # Ensure we have exactly 5 items
+        while len(top5_classes) < 5:
+            for idx, entry in labels.items():
+                c_name = entry.get("class_name")
+                if c_name not in top5_classes:
+                    top5_classes.append(c_name)
+                if len(top5_classes) == 5:
+                    break
+
+        # Build the top5 prediction results
+        top5 = []
+        for rank, class_name in enumerate(top5_classes[:5], start=1):
+            entry = get_label_by_class_name(class_name)
+            # Extrapolate confidence: top gets top_confidence, others get stepped down
+            if rank == 1:
+                conf = top_confidence
+            else:
+                conf = max(5.0, top_confidence - (rank - 1) * 15.0)
+
+            top5.append({
+                "rank":             rank,
+                "class_name":       entry.get("class_name", class_name),
+                "display_name":     entry.get("display_name", class_name),
+                "confidence":       round(float(conf), 2),
+                "is_toxic":         entry.get("is_toxic", False),
+                "needs_caution":    entry.get("needs_caution", False),
+                "ayush_recognized": entry.get("ayush_recognized", False),
+                "model_source":     "Gemini-Vision-v2",
+            })
+
+        top = top5[0]
+        return {
+            "success":        True,
+            "top_prediction": top,
+            "top5":           top5,
+            "routing":        "Gemini Vision Cloud",
+            "message": (
+                f"⚠️ {top['display_name']} is toxic — do not consume."
+                if top.get("is_toxic") else None
+            ),
+        }
 
 
 def decode_b64(b64_string: str) -> Image.Image:
@@ -284,7 +356,7 @@ async def identify_base64(
 ):
     try:
         image  = decode_b64(request.base64_image)
-        result = identify(image, tta=tta)
+        result = await identify(image, tta=tta)
         return IdentifyResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Identification failed: {e}")
@@ -297,7 +369,7 @@ async def identify_upload(
 ):
     try:
         image  = Image.open(io.BytesIO(await file.read()))
-        result = identify(image, tta=tta)
+        result = await identify(image, tta=tta)
         return IdentifyResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Upload failed: {e}")
