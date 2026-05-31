@@ -41,9 +41,18 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"   # suppress oneDNN noise
 
 # ─── Paths ────────────────────────────────────────────────────────
 ROOT_DIR     = Path(__file__).parent.parent          # VanaVaidhya/
-MODEL_DIR    = ROOT_DIR / "assets" / "model"
-WEIGHTS_PATH = MODEL_DIR / "best_v2.weights.h5"
-LABEL_PATH   = MODEL_DIR / "label_map.json"
+ML_DIR       = Path(__file__).parent
+
+# Check if running in a standalone deployment where files are local to ml/
+if (ML_DIR / "label_map.json").exists():
+    LABEL_PATH = ML_DIR / "label_map.json"
+else:
+    LABEL_PATH = ROOT_DIR / "assets" / "model" / "label_map.json"
+
+if (ML_DIR / "best_v2.weights.h5").exists():
+    WEIGHTS_PATH = ML_DIR / "best_v2.weights.h5"
+else:
+    WEIGHTS_PATH = ROOT_DIR / "assets" / "model" / "best_v2.weights.h5"
 
 IMG_SIZE    = 300
 NUM_CLASSES = 71   # fixed — matches training
@@ -376,6 +385,7 @@ async def identify_upload(
 
 
 @app.get("/health")
+@app.head("/health")
 def health():
     return {
         "status":      "ok",
@@ -394,6 +404,7 @@ class PlantInfoRequest(BaseModel):
     plant_name: str
     botanical_name: Optional[str] = None
     class_label: Optional[str] = None
+    is_toxic: Optional[bool] = False
 
 class SymptomSearchRequest(BaseModel):
     symptom: str
@@ -416,6 +427,7 @@ async def gemini_plant_info(request: PlantInfoRequest):
             request.plant_name,
             request.botanical_name,
             request.class_label,
+            request.is_toxic,
         )
         return result
     except Exception as e:

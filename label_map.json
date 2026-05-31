@@ -1,0 +1,499 @@
+{
+  "0": {
+    "class_name": "aloe_vera",
+    "display_name": "Aloe Vera",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "1": {
+    "class_name": "amla",
+    "display_name": "Amla (Indian Gooseberry)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "2": {
+    "class_name": "amruthaballi",
+    "display_name": "Amruthaballi (Giloy)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "3": {
+    "class_name": "arali",
+    "display_name": "Arali (Nerium) \u26a0\ufe0f",
+    "is_toxic": true,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "4": {
+    "class_name": "ashoka",
+    "display_name": "Ashoka Tree",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "5": {
+    "class_name": "ashwagandha",
+    "display_name": "Ashwagandha",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "6": {
+    "class_name": "asthma_weed",
+    "display_name": "Asthma Weed",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "7": {
+    "class_name": "badipala",
+    "display_name": "Badipala",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "8": {
+    "class_name": "balloon_vine",
+    "display_name": "Balloon Vine",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "9": {
+    "class_name": "bamboo",
+    "display_name": "Bamboo",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "10": {
+    "class_name": "betel",
+    "display_name": "Betel Leaf (Paan)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "11": {
+    "class_name": "betel_nut",
+    "display_name": "Betel Nut (Supari)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "12": {
+    "class_name": "brahmi",
+    "display_name": "Brahmi",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "13": {
+    "class_name": "bringaraja",
+    "display_name": "Bhringraj",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "14": {
+    "class_name": "camphor",
+    "display_name": "Camphor",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "15": {
+    "class_name": "caricature",
+    "display_name": "Caricature Plant",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "16": {
+    "class_name": "castor",
+    "display_name": "Castor (Arandi)",
+    "is_toxic": false,
+    "needs_caution": true,
+    "ayush_recognized": true
+  },
+  "17": {
+    "class_name": "catharanthus",
+    "display_name": "Catharanthus (Sadabahar)",
+    "is_toxic": false,
+    "needs_caution": true,
+    "ayush_recognized": false
+  },
+  "18": {
+    "class_name": "chakte",
+    "display_name": "Chakte",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "19": {
+    "class_name": "citron_lime",
+    "display_name": "Citron Lime",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "20": {
+    "class_name": "common_rue",
+    "display_name": "Common Rue",
+    "is_toxic": false,
+    "needs_caution": true,
+    "ayush_recognized": false
+  },
+  "21": {
+    "class_name": "coriander",
+    "display_name": "Coriander (Dhaniya)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "22": {
+    "class_name": "curry_leaf",
+    "display_name": "Curry Leaf",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "23": {
+    "class_name": "custard_apple",
+    "display_name": "Custard Apple",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "24": {
+    "class_name": "doddpathre",
+    "display_name": "Doddpathre",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "25": {
+    "class_name": "ekka",
+    "display_name": "Ekka (Crown Flower) ⚠️",
+    "is_toxic": true,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "26": {
+    "class_name": "eucalyptus",
+    "display_name": "Eucalyptus",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "27": {
+    "class_name": "ganigale",
+    "display_name": "Ganigale",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "28": {
+    "class_name": "ganike",
+    "display_name": "Ganike",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "29": {
+    "class_name": "gasagase",
+    "display_name": "Gasagase (Poppy)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "30": {
+    "class_name": "geranium",
+    "display_name": "Geranium",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "31": {
+    "class_name": "ginger",
+    "display_name": "Ginger (Adrak)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "32": {
+    "class_name": "globe_amaranth",
+    "display_name": "Globe Amaranth",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "33": {
+    "class_name": "guava",
+    "display_name": "Guava (Amrood)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "34": {
+    "class_name": "harsingar",
+    "display_name": "Harsingar (Parijat)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "35": {
+    "class_name": "henna",
+    "display_name": "Henna (Mehendi)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "36": {
+    "class_name": "hibiscus",
+    "display_name": "Hibiscus (Gudhal)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "37": {
+    "class_name": "honge",
+    "display_name": "Honge (Pongamia)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "38": {
+    "class_name": "insulin_plant",
+    "display_name": "Insulin Plant",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "39": {
+    "class_name": "jackfruit",
+    "display_name": "Jackfruit",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "40": {
+    "class_name": "jasmine",
+    "display_name": "Jasmine (Chameli)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "41": {
+    "class_name": "kamakasturi",
+    "display_name": "Kamakasturi",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "42": {
+    "class_name": "kambajala",
+    "display_name": "Kambajala",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "43": {
+    "class_name": "kasambruga",
+    "display_name": "Kasambruga",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "44": {
+    "class_name": "kepala",
+    "display_name": "Kepala",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "45": {
+    "class_name": "lantana",
+    "display_name": "Lantana \u26a0\ufe0f (Toxic)",
+    "is_toxic": true,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "46": {
+    "class_name": "lemon",
+    "display_name": "Lemon (Nimbu)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "47": {
+    "class_name": "lemongrass",
+    "display_name": "Lemongrass",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "48": {
+    "class_name": "malabar_nut",
+    "display_name": "Malabar Nut",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "49": {
+    "class_name": "mango",
+    "display_name": "Mango (Aam)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "50": {
+    "class_name": "marigold",
+    "display_name": "Marigold (Genda)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "51": {
+    "class_name": "mint",
+    "display_name": "Mint (Pudina)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "52": {
+    "class_name": "moringa",
+    "display_name": "Drumstick (Moringa)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "53": {
+    "class_name": "neem",
+    "display_name": "Neem",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "54": {
+    "class_name": "nelavembu",
+    "display_name": "Nelavembu (Kalmegh)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "55": {
+    "class_name": "nerale",
+    "display_name": "Indian Blackberry (Jamun)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "56": {
+    "class_name": "noni",
+    "display_name": "Noni",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "57": {
+    "class_name": "padri",
+    "display_name": "Padri",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "58": {
+    "class_name": "papaya",
+    "display_name": "Papaya",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "59": {
+    "class_name": "pepper",
+    "display_name": "Black Pepper",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "60": {
+    "class_name": "pomegranate",
+    "display_name": "Pomegranate (Anar)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "61": {
+    "class_name": "raktachandini",
+    "display_name": "Raktachandini",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "62": {
+    "class_name": "rose",
+    "display_name": "Rose (Gulab)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "63": {
+    "class_name": "sampige",
+    "display_name": "Champak (Sampige)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "64": {
+    "class_name": "sapota",
+    "display_name": "Sapota (Chikoo)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "65": {
+    "class_name": "tamarind",
+    "display_name": "Tamarind (Imli)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "66": {
+    "class_name": "tecoma",
+    "display_name": "Tecoma",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "67": {
+    "class_name": "thumbe",
+    "display_name": "Thumbe",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  },
+  "68": {
+    "class_name": "tulsi",
+    "display_name": "Tulsi (Holy Basil)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "69": {
+    "class_name": "turmeric",
+    "display_name": "Turmeric (Haldi)",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": true
+  },
+  "70": {
+    "class_name": "wood_sorel",
+    "display_name": "Wood Sorrel",
+    "is_toxic": false,
+    "needs_caution": false,
+    "ayush_recognized": false
+  }
+}

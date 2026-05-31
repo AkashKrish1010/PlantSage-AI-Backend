@@ -42,7 +42,12 @@ if not GEMINI_API_KEY:
 # ─── PFAF plant database ──────────────────────────────────────────
 # Same plant_db.json the frontend uses — load once at module import.
 _ROOT_DIR    = _ML_DIR.parent
-_PLANT_DB_PATH = _ROOT_DIR / "src" / "data" / "plant_db.json"
+
+# Check if running in a standalone deployment where files are local to ml/
+if (_ML_DIR / "plant_db.json").exists():
+    _PLANT_DB_PATH = _ML_DIR / "plant_db.json"
+else:
+    _PLANT_DB_PATH = _ROOT_DIR / "src" / "data" / "plant_db.json"
 
 PLANT_DB: dict[str, Any] = {}
 if _PLANT_DB_PATH.exists():
@@ -51,7 +56,11 @@ if _PLANT_DB_PATH.exists():
 else:
     print(f"⚠️  plant_db.json not found at {_PLANT_DB_PATH} — PFAF lookup disabled")
 
-_LABEL_MAP_PATH = _ROOT_DIR / "assets" / "model" / "label_map.json"
+if (_ML_DIR / "label_map.json").exists():
+    _LABEL_MAP_PATH = _ML_DIR / "label_map.json"
+else:
+    _LABEL_MAP_PATH = _ROOT_DIR / "assets" / "model" / "label_map.json"
+
 _LABEL_MAP: dict = {}
 if _LABEL_MAP_PATH.exists():
     with open(_LABEL_MAP_PATH, encoding="utf-8") as _f:
@@ -320,6 +329,7 @@ async def _get_remedies_from_gemini(
     botanical_name: str,
     known_hazards: str,
     medicinal_properties: list[str],
+    is_toxic: bool = False,
 ) -> dict:
     """
     Mirrors getRemediesFromGemini() from geminiService.ts.
@@ -339,21 +349,46 @@ async def _get_remedies_from_gemini(
     encoded_bot_wiki  = encoded_botanical.replace("%20", "_")
     plant_lower       = plant_name.lower().replace(" ", "-")
 
+    toxic_forced_rule = (
+        "\nCRITICAL SAFETY HINT: This plant is verified to be toxic/poisonous. "
+        "You MUST apply the TOXICITY SAFETY RULES, set 'is_toxic' to true, and suppress all remedies!\n"
+        if is_toxic else ""
+    )
+
     prompt = (
         f"Expert Ayurvedic physician. Plant: {plant_name} ({botanical_name}). "
         f"{props_hint} {hazard_hint}\n\n"
-        "Return ONLY valid JSON (no markdown, no extra text). Use REAL URLs only — "
-        "YouTube search URLs and Wikipedia page URLs.\n"
+        f"{toxic_forced_rule}\n"
+        "Return ONLY valid JSON (no markdown, no extra text). Use REAL URLs only.\n"
+        "TOXICITY SAFETY RULES (CRITICAL):\n"
+        "Before populating the fields, verify if this plant is toxic or poisonous.\n"
+        "If the plant is TOXIC or POISONOUS (e.g., Calotropis gigantea, Nerium oleander, Lantana, etc.) or if forced by the hint above:\n"
+        "- Set 'is_toxic' to true.\n"
+        "- Set 'partsUsed' to [].\n"
+        "- Set 'homeRemedies' to [].\n"
+        "- Set 'dosage' to 'DO NOT CONSUME. Highly toxic.'.\n"
+        "- Set 'learnMoreLinks' to ONLY include the Wikipedia article (remove all YouTube home remedy video links).\n"
+        "- Include 'poisoningSymptoms': 'Detailed description of what happens if eaten or consumed.'\n"
+        "- Include 'poisoningFirstAid': 'Urgent actions to take if already eaten (e.g., seek emergency medical care, call poison control, do not induce vomiting).'\n"
+        "If the plant is NOT toxic/poisonous:\n"
+        "- Set 'is_toxic' to false.\n"
+        "- Populate the standard 'partsUsed', 'homeRemedies', 'dosage', and 'learnMoreLinks' normally.\n"
+        "- Set 'poisoningSymptoms' to null and 'poisoningFirstAid' to null.\n\n"
+        "TOXIC LOOKALIKE CRITICAL RULE:\n"
+        "Identify if there is any toxic/poisonous lookalike species that resembles this plant. If there is, populate 'toxicLookalike' with an object containing 'name' (Common Name and Scientific Name) and 'warning' (clear instructions on how to distinguish it from this plant and what hazards it presents). If none exists, set 'toxicLookalike' to null.\n\n"
+        "Set 'images' to an empty array []. Do NOT perform a web search or retrieve/return any image URLs.\n\n"
         '{"family":"...","commonNames":["Hindi name","Sanskrit name","Tamil name"],'
         '"ayushRecognized":true,"doctorVerified":true,'
+        '"images":[],'
+        '"is_toxic":false,'
+        '"poisoningSymptoms":null,'
+        '"poisoningFirstAid":null,'
         '"partsUsed":[{"part":"Leaf","preparation":"Tea/juice"},{"part":"Root","preparation":"Powder"}],'
         '"homeRemedies":['
         '{"name":"Remedy 1","forCondition":"condition","ingredients":["ingredient1","ingredient2"],'
         '"steps":["Step 1.","Step 2.","Step 3."],"difficulty":"Easy","prepTime":"10 min"},'
-        '{"name":"Remedy 2","forCondition":"condition","ingredients":["ingredient1"],'
-        '"steps":["Step 1.","Step 2."],"difficulty":"Easy","prepTime":"5 min"},'
-        '{"name":"Remedy 3","forCondition":"condition","ingredients":["ingredient1"],'
-        '"steps":["Step 1.","Step 2."],"difficulty":"Easy","prepTime":"5 min"}],'
+        '{"name":"Remedy 2","forCondition":"condition","ingredients":["ingredient1"],"steps":["Step 1.","Step 2."],"difficulty":"Easy","prepTime":"5 min"},'
+        '{"name":"Remedy 3","forCondition":"condition","ingredients":["ingredient1"],"steps":["Step 1.","Step 2."],"difficulty":"Easy","prepTime":"5 min"}],'
         '"dosage":"Adults: dosage with timing","cautions":["caution1"],"toxicLookalike":null,'
         '"learnMoreLinks":['
         f'{{"title":"How to make {plant_name} remedy","url":"https://www.youtube.com/results?search_query={encoded_name}+home+remedy+ayurveda","type":"youtube"}},'
@@ -380,6 +415,7 @@ async def _get_remedies_from_gemini(
 async def _get_full_plant_from_gemini(
     plant_name: str,
     botanical_name: Optional[str] = None,
+    is_toxic: bool = False,
 ) -> dict:
     """
     Mirrors getFullPlantFromGemini() from geminiService.ts.
@@ -391,11 +427,41 @@ async def _get_full_plant_from_gemini(
     encoded_bot   = quote(botanical_name).replace("%20", "_") if botanical_name else encoded_name
     plant_lower   = plant_name.lower().replace(" ", "-")
 
+    toxic_forced_rule = (
+        "\nCRITICAL SAFETY HINT: This plant is verified to be toxic/poisonous. "
+        "You MUST apply the TOXICITY SAFETY RULES, set 'is_toxic' to true, and suppress all remedies!\n"
+        if is_toxic else ""
+    )
+
     prompt = (
         f"Expert AYUSH Ayurvedic botanist. Provide info about: {plant_label}\n\n"
+        f"{toxic_forced_rule}\n"
         "Return ONLY valid JSON (no markdown). Use REAL YouTube search URLs and real Wikipedia page URLs in learnMoreLinks.\n"
+        "TOXICITY SAFETY RULES (CRITICAL):\n"
+        "Before populating the fields, verify if this plant is toxic or poisonous.\n"
+        "If the plant is TOXIC or POISONOUS (e.g., Calotropis gigantea, Nerium oleander, Lantana, etc.) or if forced by the hint above:\n"
+        "- Set 'is_toxic' to true.\n"
+        "- Set 'medicinalProperties' to [].\n"
+        "- Set 'uses' to [].\n"
+        "- Set 'partsUsed' to [].\n"
+        "- Set 'homeRemedies' to [].\n"
+        "- Set 'dosage' to 'DO NOT CONSUME. Highly toxic.'.\n"
+        "- Set 'learnMoreLinks' to ONLY include the Wikipedia article (remove all YouTube home remedy video links).\n"
+        "- Include 'poisoningSymptoms': 'Detailed description of what happens if eaten or consumed.'\n"
+        "- Include 'poisoningFirstAid': 'Urgent actions to take if already eaten (e.g., seek emergency medical care, call poison control, do not induce vomiting).'\n"
+        "If the plant is NOT toxic/poisonous:\n"
+        "- Set 'is_toxic' to false.\n"
+        "- Populate standard 'medicinalProperties', 'uses', 'partsUsed', 'homeRemedies', 'dosage', and 'learnMoreLinks' normally.\n"
+        "- Set 'poisoningSymptoms' to null and 'poisoningFirstAid' to null.\n\n"
+        "TOXIC LOOKALIKE CRITICAL RULE:\n"
+        "Identify if there is any toxic/poisonous lookalike species that resembles this plant. If there is, populate 'toxicLookalike' with an object containing 'name' (Common Name and Scientific Name) and 'warning' (clear instructions on how to distinguish it from this plant and what hazards it presents). If none exists, set 'toxicLookalike' to null.\n\n"
+        "Set 'images' to an empty array []. Do NOT perform a web search or retrieve/return any image URLs.\n\n"
         '{"name":"Common name","botanicalName":"Genus species","family":"Family",'
         '"commonNames":["Hindi","Sanskrit","Tamil","Other"],'
+        '"images":[],'
+        '"is_toxic":false,'
+        '"poisoningSymptoms":null,'
+        '"poisoningFirstAid":null,'
         '"description":"2-3 sentences about medicinal significance.",'
         '"ayushRecognized":true,"doctorVerified":true,'
         '"partsUsed":[{"part":"Leaf","preparation":"Tea/juice/paste"},{"part":"Root","preparation":"Powder/decoction"},{"part":"Seed","preparation":"Oil/paste"}],'
@@ -429,6 +495,7 @@ async def _get_full_plant_from_gemini(
     result = _parse_json_safe(raw)
     result.setdefault("learnMoreLinks", [])
     result["dataSource"] = "gemini"
+    result["isToxic"] = result.get("is_toxic", False)
     return result
 
 
@@ -438,17 +505,38 @@ async def get_plant_info(
     plant_name: str,
     botanical_name: Optional[str] = None,
     class_label: Optional[str] = None,
+    is_toxic: Optional[bool] = False,
 ) -> dict:
     """
     Mirrors getPlantInfo() from geminiService.ts.
     Hybrid: PFAF static data + Gemini-generated remedies, or full Gemini fallback.
     """
     # Step 1: Try PFAF database
-    pfaf_entry = (
-        (_get_plant_by_class(class_label) if class_label else None)
-        or (_get_plant_by_name(botanical_name) if botanical_name else None)
-        or _get_plant_by_name(plant_name)
-    )
+    pfaf_entry = None
+    if class_label:
+        entry = _get_plant_by_class(class_label)
+        if entry:
+            # Prevent mismatches: verify if entry matches plant_name or botanical_name
+            common = entry.get("common_name", "").lower()
+            sci = entry.get("scientific_name", "").lower()
+            pn = plant_name.lower().strip()
+            bn = botanical_name.lower().strip() if botanical_name else ""
+            if (
+                pn in common or common in pn or
+                pn in sci or sci in pn or
+                (bn and (bn in common or common in bn or bn in sci or sci in bn))
+            ):
+                pfaf_entry = entry
+            else:
+                clean_cls = class_label.lower().replace("_", " ").strip()
+                if clean_cls in pn or pn in clean_cls:
+                    pfaf_entry = entry
+
+    if not pfaf_entry:
+        pfaf_entry = (
+            (_get_plant_by_name(botanical_name) if botanical_name else None)
+            or _get_plant_by_name(plant_name)
+        )
 
     # Step 2: PFAF hit → hybrid response
     if pfaf_entry:
@@ -478,6 +566,7 @@ async def get_plant_info(
             sci_name,
             known_hazards,
             pfaf_entry.get("medicinal_properties", []),
+            is_toxic=is_toxic or False,
         )
 
         return {
@@ -488,12 +577,12 @@ async def get_plant_info(
             "description":        description[:600],
             "ayushRecognized":    gemini_data.get("ayushRecognized", False),
             "doctorVerified":     gemini_data.get("doctorVerified", False),
-            "partsUsed":          gemini_data.get("partsUsed", []),
-            "medicinalProperties": pfaf_entry.get("medicinal_properties", []),
+            "partsUsed":          gemini_data.get("partsUsed", []) if not gemini_data.get("is_toxic") else [],
+            "medicinalProperties": pfaf_entry.get("medicinal_properties", []) if not gemini_data.get("is_toxic") else [],
             "uses": (
-                uses if uses
+                uses if uses and not gemini_data.get("is_toxic")
                 else [{"condition": p["part"], "description": p["preparation"]}
-                      for p in gemini_data.get("partsUsed", [])]
+                      for p in gemini_data.get("partsUsed", [])] if not gemini_data.get("is_toxic") else []
             ),
             "cautions":       cautions if cautions else ["Consult a physician before use."],
             "homeRemedies":   gemini_data.get("homeRemedies", []),
@@ -503,11 +592,15 @@ async def get_plant_info(
             "relatedSearches": gemini_data.get("relatedSearches", {}),
             "dataSource":     "pfaf+gemini",
             "pfafUrl":        pfaf_entry.get("pfaf_url", ""),
+            "images":         gemini_data.get("images", []),
+            "isToxic":        gemini_data.get("is_toxic", False),
+            "poisoningSymptoms": gemini_data.get("poisoningSymptoms"),
+            "poisoningFirstAid": gemini_data.get("poisoningFirstAid"),
         }
 
     # Step 3: Not in PFAF → full Gemini fallback
     print(f"[PlantSage AI] {plant_name} not in PFAF — using full Gemini")
-    return await _get_full_plant_from_gemini(plant_name, botanical_name)
+    return await _get_full_plant_from_gemini(plant_name, botanical_name, is_toxic=is_toxic or False)
 
 
 # ─── 2. Search plants by symptom ─────────────────────────────────
@@ -634,12 +727,16 @@ async def verify_plant_with_vision(
         "1. FIRST determine if this image actually shows a plant, leaf, herb, flower or tree.\n"
         "2. If it IS a plant — determine what plant and decide whether you agree with the ML prediction.\n"
         "3. If it is NOT a plant (person, animal, food, object, building, etc.) — flag it accordingly.\n\n"
+        "To ensure life-saving safety and accuracy, you MUST do web search or cross-reference trusted "
+        "botanical and toxicology databases to verify the plant's scientific/common name, toxicity profile, "
+        "poisonous nature, and safety warnings.\n\n"
         "Return ONLY a valid JSON object (no markdown, no extra text):\n"
         "{\n"
         '  "agrees": false,\n'
         '  "geminiPlant": "NOT_A_PLANT",\n'
         '  "geminiConfidence": "high",\n'
         '  "reasoning": "This image shows [what you see] and does not contain a plant as the primary subject.",\n'
+        '  "is_toxic": false,\n'
         '  "caution": null,\n'
         '  "plant_care": "Moderate",\n'
         '  "about_plant": "A 2-3 sentence description of the subject."\n'
@@ -650,6 +747,7 @@ async def verify_plant_with_vision(
         f'  "geminiPlant": "{ml_plant_name}",\n'
         '  "geminiConfidence": "high",\n'
         '  "reasoning": "One clear sentence — mention the key visual feature (leaf shape, stem color, serration, etc.)",\n'
+        '  "is_toxic": false,\n'
         '  "caution": null,\n'
         '  "plant_care": "Easy",\n'
         '  "about_plant": "A 2-3 sentence description of the plant, its origin, and its traditional Ayurvedic/medicinal value."\n'
@@ -660,7 +758,8 @@ async def verify_plant_with_vision(
         '- "geminiPlant" is your best identification — use the common English name, or "NOT_A_PLANT"\n'
         '- "geminiConfidence": "high" if certain, "medium" if likely, "low" if unclear\n'
         '- "reasoning" must be exactly ONE sentence, specific to what you see\n'
-        '- "caution" is null unless the plant is toxic/dangerous\n'
+        '- "is_toxic" is a boolean: set to true if the plant is toxic, harmful, poisonous, or dangerous to touch/consume. Otherwise false.\n'
+        '- "caution" is null unless the plant is toxic/dangerous/poisonous. If toxic/dangerous/poisonous, provide a specific warning (e.g., "Highly toxic cardiac glycosides...").\n'
         '- "plant_care" must be exactly one of: "Easy", "Moderate", or "Difficult" based on how easy it is to grow/maintain this plant\n'
         '- "about_plant" must be exactly a 2-3 sentence descriptive summary of the plant, its medicinal significance, and its traditional uses'
     )
@@ -690,6 +789,7 @@ async def verify_plant_with_vision(
             "geminiPlant": ml_plant_name,
             "geminiConfidence": "low",
             "reasoning": "Visual verification unavailable — ML prediction shown.",
+            "is_toxic": False,
             "caution": None,
             "plant_care": "Moderate",
             "about_plant": f"{ml_plant_name} is a medicinal plant traditionally utilized for its herbal health remedies.",

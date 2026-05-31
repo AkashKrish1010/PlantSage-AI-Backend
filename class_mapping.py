@@ -210,7 +210,7 @@ DISPLAY_NAMES = {
     "curry_leaf":      "Curry Leaf (Kadi Patta)",
     "custard_apple":   "Custard Apple (Sitaphal)",
     "doddpathre":      "Doddpathre (Indian Borage)",
-    "ekka":            "Ekka",
+    "ekka":            "Ekka (Crown Flower) ⚠️",
     "eucalyptus":      "Eucalyptus (Nilgiri)",
     "ganigale":        "Ganigale",
     "ganike":          "Ganike",
@@ -263,7 +263,7 @@ DISPLAY_NAMES = {
 }
 
 # ─── Toxic / Needs-Caution plant flags ─────────────────────────────
-TOXIC_PLANTS = {"lantana", "arali", "makoy"}
+TOXIC_PLANTS = {"lantana", "arali", "makoy", "ekka"}
 CAUTION_PLANTS = {"castor", "catharanthus", "common_rue"}
 
 # ─── AYUSH recognized plants ───────────────────────────────────────
