@@ -532,6 +532,10 @@ class PlantInfoRequest(BaseModel):
 class SymptomSearchRequest(BaseModel):
     symptom: str
 
+class SymptomExplainRequest(BaseModel):
+    plant_name: str
+    symptom: str
+
 class VerifyPlantRequest(BaseModel):
     base64_image: str
 
@@ -571,6 +575,21 @@ async def gemini_symptom_search(request: SymptomSearchRequest, auth: dict = Depe
     except Exception as e:
         print(f"⚠️ Gemini symptom search error: {e}")
         raise HTTPException(status_code=500, detail="Gemini symptom search query failed. Please try again.")
+
+
+@app.post("/ai/symptom-explain")
+async def gemini_symptom_explain(request: SymptomExplainRequest, auth: dict = Depends(verify_api_access)):
+    """Explain why a plant is suitable for a specific symptom and how it can be used."""
+    sanitized_plant = sanitize_input_string(request.plant_name)
+    sanitized_symptom = sanitize_symptom_string(request.symptom)
+    try:
+        explanation = await gemini_service.explain_plant_for_symptom(sanitized_plant, sanitized_symptom)
+        return {"explanation": explanation}
+    except Exception as e:
+        print(f"⚠️ Gemini symptom explain error: {e}")
+        return {
+            "explanation": f"Traditionally, {request.plant_name} is utilized to alleviate symptoms of {request.symptom} due to its natural soothing and restorative properties."
+        }
 
 
 @app.post("/ai/verify-plant")

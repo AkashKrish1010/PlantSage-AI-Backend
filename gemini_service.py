@@ -644,6 +644,27 @@ async def search_plants_by_symptom(symptom: str) -> list[dict]:
     return _parse_json_safe(raw)
 
 
+async def explain_plant_for_symptom(plant_name: str, symptom: str) -> str:
+    """
+    Generate an Ayurvedic explanation of why a specific plant is suitable
+    for a given symptom, and explain how to use it.
+    """
+    prompt = (
+        f"You are an expert Ayurvedic physician and pharmacognosist.\n"
+        f"Explain why the medicinal plant '{plant_name}' is suitable for treating the symptom or condition: '{symptom}'.\n"
+        f"Provide clinical or traditional reasons and explain exactly how it should be prepared and used for this specific symptom.\n"
+        f"Keep the response concise (around 3-4 sentences), highly practical, and formatted as a single clean paragraph."
+    )
+    explanation = await _call_gemini({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.5,
+            "maxOutputTokens": 800,
+        },
+    })
+    return explanation.strip()
+
+
 # ─── 3. Verify is plant (vision gate) ────────────────────────────
 
 async def verify_is_plant(base64_image: str) -> bool:
