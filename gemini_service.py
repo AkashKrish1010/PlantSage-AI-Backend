@@ -761,7 +761,9 @@ async def verify_plant_with_vision(
         '  "is_toxic": false,\n'
         '  "caution": null,\n'
         '  "plant_care": "Moderate",\n'
-        '  "about_plant": "A 2-3 sentence description of the subject."\n'
+        '  "about_plant": "A 2-3 sentence description of the subject.",\n'
+        '  "is_medicinal": false,\n'
+        '  "is_native_to_india": false\n'
         "}\n\n"
         "If it IS a plant:\n"
         "{\n"
@@ -772,7 +774,9 @@ async def verify_plant_with_vision(
         '  "is_toxic": false,\n'
         '  "caution": null,\n'
         '  "plant_care": "Easy",\n'
-        '  "about_plant": "A 2-3 sentence description of the plant, its origin, and its traditional Ayurvedic/medicinal value."\n'
+        '  "about_plant": "A 2-3 sentence description of the plant, its origin, and its traditional Ayurvedic/medicinal value.",\n'
+        '  "is_medicinal": true,\n'
+        '  "is_native_to_india": true\n'
         "}\n\n"
         "Rules:\n"
         '- If the image is NOT a plant, set geminiPlant to exactly "NOT_A_PLANT" and agrees to false\n'
@@ -783,7 +787,9 @@ async def verify_plant_with_vision(
         '- "is_toxic" is a boolean: set to true if the plant is toxic, harmful, poisonous, or dangerous to touch/consume. Otherwise false.\n'
         '- "caution" is null unless the plant is toxic/dangerous/poisonous. If toxic/dangerous/poisonous, provide a specific warning (e.g., "Highly toxic cardiac glycosides...").\n'
         '- "plant_care" must be exactly one of: "Easy", "Moderate", or "Difficult" based on how easy it is to grow/maintain this plant\n'
-        '- "about_plant" must be exactly a 2-3 sentence descriptive summary of the plant, its medicinal significance, and its traditional uses'
+        '- "about_plant" must be exactly a 2-3 sentence descriptive summary of the plant, its medicinal significance, and its traditional uses\n'
+        '- "is_medicinal" is a boolean: set to true if the identified plant is traditionally or scientifically recognized as having medicinal, therapeutic, herbal, or health-benefit applications. Set to false if it is purely ornamental, houseplant, weed, or non-medicinal.\n'
+        '- "is_native_to_india" is a boolean: set to true if the identified plant is native, indigenous, or historically naturalized and traditionally grown/utilized in the Indian subcontinent. Set to false if it is introduced, exotic, invasive, or native to other regions (like South America, Europe, Australia, etc.) and not native to India.'
     )
 
     body = {
@@ -815,6 +821,8 @@ async def verify_plant_with_vision(
             "caution": None,
             "plant_care": "Moderate",
             "about_plant": f"{ml_plant_name} is a medicinal plant traditionally utilized for its herbal health remedies.",
+            "is_medicinal": True,
+            "is_native_to_india": True,
         }
 
 
