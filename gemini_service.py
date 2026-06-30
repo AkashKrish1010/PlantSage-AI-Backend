@@ -653,7 +653,8 @@ async def explain_plant_for_symptom(plant_name: str, symptom: str) -> str:
         f"You are an expert Ayurvedic physician and pharmacognosist.\n"
         f"Explain why the medicinal plant '{plant_name}' is suitable for treating the symptom or condition: '{symptom}'.\n"
         f"Provide clinical or traditional reasons and explain exactly how it should be prepared and used for this specific symptom.\n"
-        f"Keep the response concise (around 3-4 sentences), highly practical, and formatted as a single clean paragraph."
+        f"Keep the response concise (around 3-4 sentences), highly practical, and formatted as a single clean paragraph.\n"
+        f"Do NOT include any markdown formatting, bullet points, headers, asterisks, bolding (**), or list tags. Return ONLY plain, clean text."
     )
     explanation = await _call_gemini({
         "contents": [{"parts": [{"text": prompt}]}],
