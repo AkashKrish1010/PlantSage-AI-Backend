@@ -428,6 +428,21 @@ def get_classes():
     return {"classes": list(labels.values())}
 
 
+class DebugErrorRequest(BaseModel):
+    message: str
+    stack: Optional[str] = None
+    context: Optional[str] = None
+
+
+@app.post("/debug/error")
+async def log_debug_error(request: DebugErrorRequest):
+    """Debug endpoint: log a client error to the backend console."""
+    print(f"🚨 [CLIENT EXCEPTION] {request.context or 'General'}: {request.message}")
+    if request.stack:
+        print(f"   Stack Trace:\n{request.stack}")
+    return {"success": True}
+
+
 @app.post("/debug/save-image")
 async def save_debug_image(request: IdentifyRequest):
     """Debug endpoint: save the received base64 image as a 300x300 preview JPEG file."""
