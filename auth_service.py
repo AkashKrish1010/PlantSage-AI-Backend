@@ -19,8 +19,11 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+
+_ML_DIR = Path(__file__).parent
+load_dotenv(_ML_DIR / ".env")
 
 # ── Passlib (bcrypt) ──────────────────────────────────────────────────────────
 from passlib.context import CryptContext
@@ -134,8 +137,6 @@ async def create_email_user(name: str, email: str, password: str) -> dict:
         "name":          name.strip(),
         "email":         email.lower().strip(),
         "password_hash": hash_password(password),
-        "google_id":     None,
-        "photo_url":     None,
         "login_method":  "email",
         "created_at":    now,
         "updated_at":    now,
@@ -257,11 +258,15 @@ async def verify_google_id_token(id_token: str) -> Optional[dict]:
                 return None
             data = resp.json()
 
-            # Verify audience matches our client ID (skip if client ID not configured)
-            if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_ID != "YOUR_GOOGLE_CLIENT_ID_HERE":
-                aud = data.get("aud", "")
-                if GOOGLE_CLIENT_ID not in aud:
-                    return None
+            # Verify audience matches our client ID (enforced for security)
+            if not GOOGLE_CLIENT_ID or GOOGLE_CLIENT_ID == "YOUR_GOOGLE_CLIENT_ID_HERE":
+                print("⚠️ Google ID token verification rejected: GOOGLE_CLIENT_ID is not configured on the server.")
+                return None
+
+            aud = data.get("aud", "")
+            if GOOGLE_CLIENT_ID not in aud:
+                print(f"⚠️ Google ID token verification failed: audience mismatch (aud: {aud}, expected: {GOOGLE_CLIENT_ID})")
+                return None
 
             return {
                 "google_id": data.get("sub"),
@@ -269,5 +274,6 @@ async def verify_google_id_token(id_token: str) -> Optional[dict]:
                 "name":      data.get("name", data.get("email", "").split("@")[0]),
                 "photo_url": data.get("picture"),
             }
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ Google token verification exception: {e}")
             return None
