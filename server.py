@@ -1,19 +1,15 @@
 """
-server.py  —  VanaVaidhya Plant Identification API  (v2 — EfficientNetV2S / Keras)
+server.py  —  PlantSage AI Cloud API (FastAPI)
 ====================================================================================
-Model: EfficientNetV2S trained on 71 Indian medicinal plant species
-       val_accuracy: 96.6%  |  TTA accuracy: 98.4%
+Lightweight server providing:
+  • Plant Identification via Gemini Vision Cloud (fallback & web client)
+  • AyurGenix / Gemini Ayurvedic Remedies & Dosages
+  • Plant Presence Gate (Lightweight Vision check)
+  • Symptom-based Ayurvedic plant search
+  • MongoDB Auth & JWT Token verification
 
-NOTE: We load the Keras model (best_v2.weights.h5) directly instead of the TFLite
-      file, because the exported TFLite uses SELECT_TF_OPS (Flex ops) which require
-      the Flex delegate — not available in the standard desktop TFLite interpreter.
-      Loading via Keras/TF is equivalent in accuracy and simpler on desktop.
-
-Input preprocessing (matches training):
-  - Resize to 300×300
-  - float32 in [0, 255]   ← model's built-in preprocessing rescales to [-1, 1]
-
-TTA (Test-Time Augmentation): optional, enabled with ?tta=true query param.
+Mobile on-device classification runs locally via bundled plant_model.tflite.
+Heavy desktop TensorFlow & training dependencies are eliminated.
 
 Usage:
     python ml/server.py
@@ -22,7 +18,7 @@ API:  http://localhost:8000
 Docs: http://localhost:8000/docs
 """
 
-import io, json, base64, sys
+import io, json, base64, sys, os, re
 from pathlib import Path
 from typing import Optional
 
@@ -32,10 +28,8 @@ if hasattr(sys.stdout, 'reconfigure'):
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-import numpy as np
 from PIL import Image
 import uvicorn
-import re
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -43,12 +37,9 @@ from pydantic import BaseModel, EmailStr
 import gemini_service
 import auth_service
 
-import os
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"   # suppress oneDNN noise
-
 # ─── Paths ────────────────────────────────────────────────────────
-ROOT_DIR     = Path(__file__).parent.parent          # VanaVaidhya/
-ML_DIR       = Path(__file__).parent
+ROOT_DIR = Path(__file__).parent.parent          # VanaVaidhya/
+ML_DIR   = Path(__file__).parent
 
 # Check if running in a standalone deployment where files are local to ml/
 if (ML_DIR / "label_map.json").exists():
@@ -56,13 +47,8 @@ if (ML_DIR / "label_map.json").exists():
 else:
     LABEL_PATH = ROOT_DIR / "assets" / "model" / "label_map.json"
 
-if (ML_DIR / "best_v2.weights.h5").exists():
-    WEIGHTS_PATH = ML_DIR / "best_v2.weights.h5"
-else:
-    WEIGHTS_PATH = ROOT_DIR / "assets" / "model" / "best_v2.weights.h5"
-
-IMG_SIZE    = 300
-NUM_CLASSES = 71   # fixed — matches training
+NUM_CLASSES = 71   # fixed — matches training dataset
+IMG_SIZE    = 300  # model standard image dimension
 
 # Load label map
 labels = {}
@@ -72,63 +58,8 @@ if LABEL_PATH.exists():
 else:
     print(f"⚠️ Label map not found at {LABEL_PATH}")
 
-# Render Free instance has only 512MB RAM, importing tensorflow causes OOM crashes.
-# We auto-switch to Gemini-only mode if weights are missing (e.g. ignored by git)
-# or if specifically forced via env variable.
-USE_LOCAL_MODEL = WEIGHTS_PATH.exists() and os.environ.get("USE_GEMINI_ONLY", "false").lower() != "true"
+print("☁️ PlantSage AI — Running in Lightweight Cloud mode (Gemini Vision + Groq + MongoDB)")
 
-model = None
-if USE_LOCAL_MODEL:
-    print("🌿 VanaVaidhya AI — Loading local Keras model...")
-    try:
-        import tensorflow as tf
-        from tensorflow.keras.applications import EfficientNetV2S
-        from tensorflow.keras import layers, Model
-
-        # Suppress GPU memory grabs on machines with limited VRAM
-        gpus = tf.config.list_physical_devices("GPU")
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-
-        # Rebuild the exact same architecture as training (Cell 9 of the notebook)
-        base = EfficientNetV2S(
-            input_shape=(IMG_SIZE, IMG_SIZE, 3),
-            include_top=False,
-            weights=None,          # we load from weights file below
-            pooling="avg",
-        )
-
-        inp = tf.keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
-        x   = base(inp)
-        x   = layers.Dense(512, activation="relu")(x)
-        x   = layers.BatchNormalization()(x)
-        x   = layers.Dropout(0.3)(x)
-        x   = layers.Dense(256, activation="relu")(x)
-        x   = layers.BatchNormalization()(x)
-        x   = layers.Dropout(0.3)(x)
-        out = layers.Dense(NUM_CLASSES, activation="softmax", dtype="float32")(x)
-
-        model = Model(inp, out)
-
-        # Compile (needed so optimizer variables are initialised before loading weights)
-        model.compile(
-            optimizer=tf.keras.optimizers.Adam(5e-5),
-            loss="sparse_categorical_crossentropy",
-            metrics=["accuracy"],
-        )
-
-        print(f"  Loading weights from {WEIGHTS_PATH.name} …")
-        model.load_weights(str(WEIGHTS_PATH))
-        model.trainable = False   # inference only
-
-        print(f"  ✅ Local Keras model ready — {NUM_CLASSES} classes | Input: {IMG_SIZE}×{IMG_SIZE}")
-        print(f"  🎯 Accuracy: 96.6% val  /  98.4% TTA")
-    except Exception as e:
-        print(f"  ⚠️ Failed to load local model: {e}")
-        print("  🔄 Switching to Gemini-only Cloud mode.")
-        USE_LOCAL_MODEL = False
-else:
-    print("☁️ VanaVaidhya AI — Running in Gemini-only Cloud mode (no local TensorFlow)...")
 
 
 # ─── FastAPI app ──────────────────────────────────────────────────
@@ -225,65 +156,7 @@ def sanitize_symptom_string(value: str, max_length: int = 200) -> str:
     return re.sub(r"[^\w\s\,\.\?\-\/]", "", value)
 
 
-# ─── Preprocessing ────────────────────────────────────────────────
-def preprocess(image: Image.Image) -> np.ndarray:
-    """Resize + convert to float32 in [0, 255]. Model handles rescaling internally."""
-    img = image.convert("RGB").resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
-    try:
-        preview_path = Path(__file__).parent / "preprocessed_preview.jpg"
-        img.save(preview_path, "JPEG")
-    except Exception as e:
-        print(f"⚠️ Failed to save preprocess preview image: {e}")
-    arr = np.array(img, dtype=np.float32)    # already in [0, 255]
-    return np.expand_dims(arr, axis=0)        # (1, 300, 300, 3)
-
-
-def augment(image: Image.Image, seed: int) -> np.ndarray:
-    """Single augmented pass for TTA — flip + slight crop."""
-    rng = np.random.default_rng(seed)
-    img = image.convert("RGB")
-
-    if rng.random() > 0.5:
-        img = img.transpose(Image.FLIP_LEFT_RIGHT)
-
-    w, h = img.size
-    pad = int(min(w, h) * 0.08)
-    padded = Image.new("RGB", (w + pad * 2, h + pad * 2))
-    padded.paste(img, (pad, pad))
-    x0 = rng.integers(0, pad * 2 + 1)
-    y0 = rng.integers(0, pad * 2 + 1)
-    img = padded.crop((x0, y0, x0 + w, y0 + h))
-
-    img = img.resize((IMG_SIZE, IMG_SIZE), Image.LANCZOS)
-    arr = np.array(img, dtype=np.float32)
-    return np.expand_dims(arr, axis=0)
-
-
-# ─── Inference ────────────────────────────────────────────────────
-def run_inference(img_array: np.ndarray) -> np.ndarray:
-    """Run a single forward pass; return probability vector."""
-    return model(img_array, training=False).numpy()[0]
-
-
-def top5_from_probs(probs: np.ndarray) -> list[dict]:
-    """Convert probability array to ranked top-5 prediction list."""
-    top5_idx = probs.argsort()[-5:][::-1]
-    results = []
-    for rank, idx in enumerate(top5_idx, start=1):
-        entry = labels.get(str(idx), {})
-        results.append({
-            "rank":             rank,
-            "class_name":       entry.get("class_name", f"class_{idx}"),
-            "display_name":     entry.get("display_name", f"class_{idx}"),
-            "confidence":       round(float(probs[idx]) * 100, 2),
-            "is_toxic":         entry.get("is_toxic", False),
-            "needs_caution":    entry.get("needs_caution", False),
-            "ayush_recognized": entry.get("ayush_recognized", False),
-            "model_source":     "EfficientNetV2S-v2",
-        })
-    return results
-
-
+# ─── Inference (Gemini Vision Cloud) ──────────────────────────────
 def get_label_by_class_name(class_name: str) -> dict:
     """Helper to retrieve labels entry by its class_name."""
     for idx, entry in labels.items():
@@ -299,86 +172,59 @@ def get_label_by_class_name(class_name: str) -> dict:
 
 
 async def identify(image: Image.Image, tta: bool = False) -> dict:
-    """Core identification — single pass or 4-pass TTA on local model, or Gemini fallback."""
-    if USE_LOCAL_MODEL:
-        probs = run_inference(preprocess(image))
+    """Core identification — Gemini Cloud Vision."""
+    print("☁️ [ML INFERENCE] Gemini Cloud Vision used for classification.")
+    # Convert PIL image to base64 to send to Gemini Vision
+    buffered = io.BytesIO()
+    image.convert("RGB").save(buffered, format="JPEG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
 
-        if tta:
-            for seed in range(1, 4):
-                probs = probs + run_inference(augment(image, seed=seed))
-            probs = probs / 4.0
-            method = "TTA (4 passes)"
+    # Call Gemini to identify the plant
+    gemini_res = await gemini_service.identify_plant_with_gemini(img_str)
+    top5_classes = gemini_res.get("top5_class_names", [])
+    top_confidence = gemini_res.get("confidence", 90.0)
+
+    # Ensure we have exactly 5 items
+    while len(top5_classes) < 5:
+        for idx, entry in labels.items():
+            c_name = entry.get("class_name")
+            if c_name not in top5_classes:
+                top5_classes.append(c_name)
+            if len(top5_classes) == 5:
+                break
+
+    # Build the top5 prediction results
+    top5 = []
+    for rank, class_name in enumerate(top5_classes[:5], start=1):
+        entry = get_label_by_class_name(class_name)
+        # Extrapolate confidence: top gets top_confidence, others get stepped down
+        if rank == 1:
+            conf = top_confidence
         else:
-            method = "single pass"
+            conf = max(5.0, top_confidence - (rank - 1) * 15.0)
 
-        print(f"🌿 [ML INFERENCE] Local EfficientNetV2S model used ({method}) for classification.")
+        top5.append({
+            "rank":             rank,
+            "class_name":       entry.get("class_name", class_name),
+            "display_name":     entry.get("display_name", class_name),
+            "confidence":       round(float(conf), 2),
+            "is_toxic":         entry.get("is_toxic", False),
+            "needs_caution":    entry.get("needs_caution", False),
+            "ayush_recognized": entry.get("ayush_recognized", False),
+            "model_source":     "Gemini-Vision-v2",
+        })
 
-        top5 = top5_from_probs(probs)
-        top  = top5[0]
-
-        return {
-            "success":        True,
-            "top_prediction": top,
-            "top5":           top5,
-            "routing":        f"EfficientNetV2S — {method}",
-            "message": (
-                f"⚠️ {top['display_name']} is toxic — do not consume."
-                if top.get("is_toxic") else None
-            ),
-        }
-    else:
-        print("☁️ [ML INFERENCE] Gemini Cloud Vision used for classification.")
-        # Convert PIL image to base64 to send to Gemini Vision
-        buffered = io.BytesIO()
-        image.convert("RGB").save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-
-        # Call Gemini to identify the plant
-        gemini_res = await gemini_service.identify_plant_with_gemini(img_str)
-        top5_classes = gemini_res.get("top5_class_names", [])
-        top_confidence = gemini_res.get("confidence", 90.0)
-
-        # Ensure we have exactly 5 items
-        while len(top5_classes) < 5:
-            for idx, entry in labels.items():
-                c_name = entry.get("class_name")
-                if c_name not in top5_classes:
-                    top5_classes.append(c_name)
-                if len(top5_classes) == 5:
-                    break
-
-        # Build the top5 prediction results
-        top5 = []
-        for rank, class_name in enumerate(top5_classes[:5], start=1):
-            entry = get_label_by_class_name(class_name)
-            # Extrapolate confidence: top gets top_confidence, others get stepped down
-            if rank == 1:
-                conf = top_confidence
-            else:
-                conf = max(5.0, top_confidence - (rank - 1) * 15.0)
-
-            top5.append({
-                "rank":             rank,
-                "class_name":       entry.get("class_name", class_name),
-                "display_name":     entry.get("display_name", class_name),
-                "confidence":       round(float(conf), 2),
-                "is_toxic":         entry.get("is_toxic", False),
-                "needs_caution":    entry.get("needs_caution", False),
-                "ayush_recognized": entry.get("ayush_recognized", False),
-                "model_source":     "Gemini-Vision-v2",
-            })
-
-        top = top5[0]
-        return {
-            "success":        True,
-            "top_prediction": top,
-            "top5":           top5,
-            "routing":        "Gemini Vision Cloud",
-            "message": (
-                f"⚠️ {top['display_name']} is toxic — do not consume."
-                if top.get("is_toxic") else None
-            ),
-        }
+    top = top5[0]
+    return {
+        "success":        True,
+        "top_prediction": top,
+        "top5":           top5,
+        "routing":        "Gemini Vision Cloud",
+        "message": (
+            f"⚠️ {top['display_name']} is toxic — do not consume."
+            if top.get("is_toxic") else None
+        ),
+    }
 
 
 def decode_b64(b64_string: str) -> Image.Image:
@@ -442,20 +288,6 @@ async def log_debug_error(request: DebugErrorRequest):
         print(f"   Stack Trace:\n{request.stack}")
     return {"success": True}
 
-
-@app.post("/debug/save-image")
-async def save_debug_image(request: IdentifyRequest):
-    """Debug endpoint: save the received base64 image as a 300x300 preview JPEG file."""
-    try:
-        image = decode_b64(request.base64_image)
-        img_resized = image.convert("RGB").resize((300, 300), Image.LANCZOS)
-        preview_path = Path(__file__).parent / "preprocessed_preview.jpg"
-        img_resized.save(preview_path, "JPEG")
-        print(f"📸 Debug image saved to: {preview_path.resolve()}")
-        return {"success": True, "path": str(preview_path.resolve())}
-    except Exception as e:
-        print(f"⚠️ Failed to save debug image: {e}")
-        return {"success": False, "error": str(e)}
 
 
 @app.post("/identify", response_model=IdentifyResponse)
@@ -753,11 +585,10 @@ async def auth_logout(req: LogoutRequest):
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 8000))
-    print(f"\n🚀 VanaVaidhya AI v2 — Server starting...")
-    print(f"   Model  : EfficientNetV2S — {NUM_CLASSES} classes")
-    print(f"   Accuracy: 96.6% val  /  98.4% TTA")
-    print(f"   Docs   : http://localhost:{port}/docs")
-    print(f"   TTA    : POST /identify?tta=true")
+    print(f"\n🚀 PlantSage AI — Lightweight Cloud API starting...")
+    print(f"   Architecture: Gemini Cloud Vision + MongoDB + Groq Fallback")
+    print(f"   Mobile App  : On-Device TFLite Inference ({NUM_CLASSES} classes)")
+    print(f"   Docs        : http://localhost:{port}/docs")
     print(f"   Ctrl+C to stop\n")
     uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
 

@@ -16,8 +16,18 @@ All prompts are kept identical to the TypeScript originals.
 import json
 import os
 import re
+import sys
+import time
+import asyncio
+from collections import deque
 from pathlib import Path
 from typing import Any, Optional
+
+# Ensure safe console outputs on Windows cp1252 consoles
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 import httpx
 from dotenv import load_dotenv
@@ -29,15 +39,106 @@ load_dotenv(_ML_DIR / ".env")
 GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL        = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-3.1-flash-lite")
+GEMINI_VISION_FALLBACK_MODEL = os.getenv("GEMINI_VISION_FALLBACK_MODEL", "gemini-3.5-flash-lite")
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL   = "meta-llama/llama-4-scout-17b-16e-instruct"
+GROQ_MODEL   = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
 if not GEMINI_API_KEY:
     raise RuntimeError(
         "GEMINI_API_KEY is not set. "
         "Add it to ml/.env or set it as an environment variable."
     )
+
+# ─── Rate Limiting System ──────────────────────────────────────────
+class SlidingWindowRateLimiter:
+    """
+    Tracks and enforces RPM, TPM, RPD, and TPD sliding-window rate limits.
+    """
+    def __init__(self, name: str, rpm: int, rpd: int, tpm: int, tpd: int = 0):
+        self.name = name
+        self.rpm = rpm
+        self.rpd = rpd
+        self.tpm = tpm
+        self.tpd = tpd
+
+        self.history_minute: deque[tuple[float, int]] = deque()
+        self.history_day: deque[tuple[float, int]] = deque()
+        self._lock = asyncio.Lock()
+        self.cooldown_until = 0.0
+
+    def _cleanup(self, now: float):
+        min_cutoff = now - 60.0
+        while self.history_minute and self.history_minute[0][0] < min_cutoff:
+            self.history_minute.popleft()
+
+        day_cutoff = now - 86400.0
+        while self.history_day and self.history_day[0][0] < day_cutoff:
+            self.history_day.popleft()
+
+    async def can_request(self, est_tokens: int = 500) -> tuple[bool, str]:
+        async with self._lock:
+            now = time.time()
+            if now < self.cooldown_until:
+                wait_sec = int(self.cooldown_until - now)
+                return False, f"Provider in cooldown ({wait_sec}s remaining)"
+
+            self._cleanup(now)
+
+            if len(self.history_minute) >= self.rpm:
+                return False, f"RPM limit reached ({len(self.history_minute)}/{self.rpm})"
+
+            current_tpm = sum(t for _, t in self.history_minute)
+            if self.tpm > 0 and (current_tpm + est_tokens) > self.tpm:
+                return False, f"TPM limit reached ({current_tpm + est_tokens}/{self.tpm})"
+
+            if len(self.history_day) >= self.rpd:
+                return False, f"RPD limit reached ({len(self.history_day)}/{self.rpd})"
+
+            if self.tpd > 0:
+                current_tpd = sum(t for _, t in self.history_day)
+                if (current_tpd + est_tokens) > self.tpd:
+                    return False, f"TPD limit reached ({current_tpd + est_tokens}/{self.tpd})"
+
+            return True, "ok"
+
+    async def record_request(self, est_tokens: int = 500):
+        async with self._lock:
+            now = time.time()
+            self._cleanup(now)
+            self.history_minute.append((now, est_tokens))
+            self.history_day.append((now, est_tokens))
+
+    async def trigger_cooldown(self, seconds: float = 60.0):
+        async with self._lock:
+            self.cooldown_until = time.time() + seconds
+
+# Gemini 3.1 Flash Lite limits: 15 RPM, 250K TPM, 500 RPD
+gemini_limiter = SlidingWindowRateLimiter(
+    name="Gemini 3.1 Flash Lite",
+    rpm=15,
+    rpd=500,
+    tpm=250_000,
+    tpd=0
+)
+
+# Gemini 3.5 Flash Lite limits: 15 RPM, 250K TPM, 500 RPD (fallback pool)
+gemini_35_limiter = SlidingWindowRateLimiter(
+    name="Gemini 3.5 Flash Lite",
+    rpm=15,
+    rpd=500,
+    tpm=250_000,
+    tpd=0
+)
+
+# Groq (openai/gpt-oss-20b) limits: 30 RPM, 8K TPM, 1K RPD, 200K TPD
+groq_limiter = SlidingWindowRateLimiter(
+    name="Groq (openai/gpt-oss-20b)",
+    rpm=30,
+    rpd=1_000,
+    tpm=8_000,
+    tpd=200_000
+)
 
 # ─── PFAF plant database ──────────────────────────────────────────
 # Same plant_db.json the frontend uses — load once at module import.
@@ -171,44 +272,35 @@ def _build_uses_from_pfaf(props: list[str]) -> list[dict]:
 
 # ─── Core Gemini & Groq API callers ────────────────────────────────
 
-async def _call_groq_fallback(gemini_body: dict) -> str:
+async def _call_groq_fallback(gemini_body: dict, est_tokens: int = 500) -> str:
     """
     Translates a Gemini API request body into OpenAI format,
-    sends it to Groq API, and returns the response text.
+    enforces Groq sliding window rate limits (30 RPM, 8K TPM, 1K RPD, 200K TPD),
+    sends it to Groq API (openai/gpt-oss-20b), and returns the response text.
     """
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY not configured. Cannot fallback to Groq.")
 
-    # 1. Extract prompt and base64 image (if present) from Gemini payload
+    can_groq, groq_reason = await groq_limiter.can_request(est_tokens)
+    if not can_groq:
+        raise RuntimeError(f"Groq rate limit exceeded ({groq_reason})")
+
+    # 1. Extract prompt and note if image is present
     parts = gemini_body.get("contents", [{}])[0].get("parts", [])
-    prompt = ""
-    base64_image = ""
+    prompt_parts = []
+    has_image = False
     for part in parts:
         if "text" in part:
-            prompt = part["text"]
+            prompt_parts.append(part["text"])
         elif "inline_data" in part:
-            base64_image = part["inline_data"].get("data", "")
+            has_image = True
 
-    # 2. Build Groq request messages
-    messages = []
-    if base64_image:
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}"
-                    }
-                }
-            ]
-        })
-    else:
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
+    prompt = "\n".join(prompt_parts)
+    if has_image:
+        prompt += "\n\n(Note: Textual fallback analysis mode for plant and Ayurvedic medicine assessment.)"
+
+    # 2. Build Groq request messages (content MUST be a string for openai/gpt-oss-20b)
+    messages = [{"role": "user", "content": prompt}]
 
     # 3. Build Groq payload
     groq_payload = {
@@ -229,8 +321,12 @@ async def _call_groq_fallback(gemini_body: dict) -> str:
         "Authorization": f"Bearer {GROQ_API_KEY}"
     }
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=45.0) as client:
         resp = await client.post(url, json=groq_payload, headers=headers)
+
+    if resp.status_code == 429:
+        await groq_limiter.trigger_cooldown(60.0)
+        raise RuntimeError(f"Groq 429 Rate Limit Exceeded: {resp.text}")
 
     if resp.status_code != 200:
         raise RuntimeError(f"Groq API error {resp.status_code}: {resp.text}")
@@ -240,23 +336,33 @@ async def _call_groq_fallback(gemini_body: dict) -> str:
     if not content:
         raise RuntimeError("Empty response from Groq")
 
+    tokens_used = data.get("usage", {}).get("total_tokens", est_tokens)
+    await groq_limiter.record_request(tokens_used)
+
     return content
 
 
-async def _call_gemini_http(body: dict, model: str) -> str:
+async def _call_gemini_http(body: dict, model: str, limiter: SlidingWindowRateLimiter = gemini_limiter) -> tuple[str, int]:
     """
     Makes a raw HTTP POST request to the Gemini API endpoint.
-    No automatic logging or fallbacks.
+    Handles 429 rate limit triggers and extracts token usage.
     """
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent?key={GEMINI_API_KEY}"
     )
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=45.0) as client:
         resp = await client.post(url, json=body)
+
+    if resp.status_code == 429:
+        await limiter.trigger_cooldown(60.0)
+        raise RuntimeError(f"Gemini ({model}) 429 Rate Limit Exceeded: {resp.text}")
+
     if resp.status_code != 200:
-        raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text}")
+        raise RuntimeError(f"Gemini ({model}) API error {resp.status_code}: {resp.text}")
+
     data = resp.json()
+    tokens = data.get("usageMetadata", {}).get("totalTokenCount", 500)
     text = (
         data.get("candidates", [{}])[0]
         .get("content", {})
@@ -264,25 +370,62 @@ async def _call_gemini_http(body: dict, model: str) -> str:
         .get("text")
     )
     if not text:
-        raise RuntimeError("Empty response from Gemini")
-    return text
+        raise RuntimeError(f"Empty response from Gemini ({model})")
+    return text, tokens
 
 
 async def _call_gemini(body: dict, model: str = GEMINI_MODEL) -> str:
     """
-    POST to Gemini generateContent endpoint (Tier 1).
-    If the call fails and a Groq API Key is present, falls back to Groq (Tier 2).
+    POST to Gemini generateContent endpoint with active rate limiting.
+    - If primary Gemini model (gemini-3.1-flash-lite) is busy or fails:
+      * For image/vision requests: falls back to Gemini 3.5 Flash Lite (gemini-3.5-flash-lite).
+        If both fail, triggers graceful botanical on-device fallback.
+      * For text requests: falls back to Groq (openai/gpt-oss-20b).
     """
-    print(f"[PlantSage AI] Calling primary model: {model}")
-    try:
-        return await _call_gemini_http(body, model)
-    except Exception as e:
-        if GROQ_API_KEY:
-            print(f"[PlantSage AI] Gemini failed: {e}. Falling back to Groq model: {GROQ_MODEL}")
-            return await _call_groq_fallback(body)
+    est_tokens = body.get("generationConfig", {}).get("maxOutputTokens", 500) + 200
+    is_vision = any("inline_data" in part for part in body.get("contents", [{}])[0].get("parts", []))
+
+    primary_model = GEMINI_VISION_MODEL if is_vision else model
+    primary_limiter = gemini_limiter
+
+    # ── Attempt 1: Primary Gemini Model (Gemini 3.1 Flash Lite) ──
+    can_primary, primary_reason = await primary_limiter.can_request(est_tokens)
+    if can_primary:
+        print(f"[PlantSage AI] Calling primary model: {primary_model}")
+        try:
+            text, tokens = await _call_gemini_http(body, primary_model, primary_limiter)
+            await primary_limiter.record_request(tokens)
+            return text
+        except Exception as e:
+            print(f"[PlantSage AI] Primary Gemini ({primary_model}) failed: {e}")
+    else:
+        print(f"[PlantSage AI - RATE-LIMIT] Primary Gemini rate limit active ({primary_reason})")
+
+    # ── Vision Requests: Fallback to Gemini 3.5 Flash Lite ──
+    if is_vision:
+        fallback_model = GEMINI_VISION_FALLBACK_MODEL
+        can_fallback, fallback_reason = await gemini_35_limiter.can_request(est_tokens)
+        if can_fallback:
+            print(f"[PlantSage AI] Calling vision fallback model: {fallback_model}")
+            try:
+                text, tokens = await _call_gemini_http(body, fallback_model, gemini_35_limiter)
+                await gemini_35_limiter.record_request(tokens)
+                return text
+            except Exception as e:
+                print(f"[PlantSage AI] Vision fallback ({fallback_model}) failed: {e}")
         else:
-            print(f"[PlantSage AI] Gemini failed: {e}. No GROQ_API_KEY available for fallback.")
-            raise e
+            print(f"[PlantSage AI - RATE-LIMIT] Gemini 3.5 rate limit active ({fallback_reason})")
+
+        print(f"[PlantSage AI] Both Gemini Vision models unavailable — triggering on-device botanical fallback.")
+        raise RuntimeError("Gemini Vision unavailable; triggering graceful botanical fallback.")
+
+    # ── Text Requests: Fallback to Groq ──
+    if GROQ_API_KEY:
+        print(f"[PlantSage AI] Falling back to Groq text model: {GROQ_MODEL}")
+        return await _call_groq_fallback(body, est_tokens)
+    else:
+        print(f"[PlantSage AI] Gemini failed. No GROQ_API_KEY available for fallback.")
+        raise RuntimeError("Primary AI failed and no fallback API key configured.")
 
 
 def _parse_json_safe(text: str) -> Any:
@@ -704,30 +847,12 @@ async def verify_is_plant(base64_image: str) -> bool:
         },
     }
 
-    raw = ""
-    if GROQ_API_KEY:
-        try:
-            print(f"[PlantSage AI] Calling primary model: {GROQ_MODEL}")
-            raw = await _call_groq_fallback(body)
-        except Exception as e:
-            print(f"[PlantSage AI] Groq failed: {e}. Falling back to Gemini model: {GEMINI_VISION_MODEL}")
-            try:
-                raw = await _call_gemini_http(body, model=GEMINI_VISION_MODEL)
-            except Exception as e2:
-                print(f"[PlantSage AI] Gemini fallback also failed: {e2}")
-                return True # fail open
-    else:
-        try:
-            print(f"[PlantSage AI] No GROQ_API_KEY configured. Calling Gemini fallback model: {GEMINI_VISION_MODEL}")
-            raw = await _call_gemini_http(body, model=GEMINI_VISION_MODEL)
-        except Exception as e2:
-            print(f"[PlantSage AI] Gemini fallback call failed: {e2}")
-            return True # fail open
-
     try:
+        raw = await _call_gemini(body, model=GEMINI_VISION_MODEL)
         result = _parse_json_safe(raw)
         return result.get("is_plant") is True
-    except Exception:
+    except Exception as e:
+        print(f"[PlantSage AI] verify_is_plant error ({e}) — failing open to allow identification")
         return True  # fail open
 
 

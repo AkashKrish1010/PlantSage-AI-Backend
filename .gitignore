@@ -49,3 +49,7 @@ output/
 # OS-specific temporary files
 .DS_Store
 Thumbs.db
+
+# Offline conversion scripts
+convert_weights_to_tflite.py
+
